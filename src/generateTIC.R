@@ -5,8 +5,9 @@ library(RColorBrewer)
 library(scatterplot3d)
 library(igraph)
 library(lmtest)
-#library(networkDynamic)
-#library(ndtv)
+library(tuneR)
+#library(foreach)
+#library(doParallel)
 
 # housekeeping
 options(scipen = 999)
@@ -33,13 +34,15 @@ degree.distribution <- function (graph, cumulative = FALSE, ...)
 
 # parameters
 
-patients <- c('001','002','003','004','005','006','007','008','009','010','011')
-suffices <- c('ai','aii','bi','bii','ci','cii','di','dii','ei','eii') 
+patients <- c('S001','S002','S003','S004','S005','S006','S007','S008','S009','S010','S011')
+suffices <- c('am') 
 
-levels <- c(1,10,50,100) # configure the threshold levels to inspect here
+levels <- c(50) # configure the threshold levels to inspect here
+cohlev <- 0.99 #this is for spectral coherence 
 
-nChannels <- 14 # configure the number of channels of the EEG measurement here
-
+nChannels <- 256 # configure the number of channels of the EEG measurement here
+sRate <- 250
+secs <- 1 # configure how long the slices shall be
 # preprocessing
 
 stats <- data.frame(matrix(vector(), 6, 0))
@@ -50,24 +53,53 @@ for(lev in levels){
     for(suf in suffices){
   
       #replace with path to EEG data
-      mat_dat <- readMat(paste("../data/U",pat,suf,".mat",sep=''))
+      mat_dat <- readMat(paste("../data/",pat,suf,".mat",sep=''))
       
-      tmp <- t(mat_dat$eeg)
+      tmp <- t(mat_dat$val)
+      
+      dPoints <- length(tmp[,1])
       
       events<-list()
       specs<-list()
-      for(i in 1:99){
+      for(i in 1:floor(dPoints/(sRate*secs))){ #todo -> fix the slicing to make it generic based on sampling rate and signal length
+        
         for(j in 1:nChannels){
-          ds1 <- tmp[((i*178)-177):(i*178),j]
-          specs[[j]]<-stats::spectrum(ds1, plot=FALSE)
-          #specs[[j]]<-ds1
+          ds1 <- tmp[((i*sRate*secs)-((sRate*secs)-1)):(i*sRate*secs),j] # todo -> see above for generic slicing todo
+          
+          #for power spectra comparison use the power spectra of the slices as initialised below
+          #wv<-Wave(ds1,samp.rate=sRate)
+          #s1 <- wv@left
+          #s1 <- s1 / 2^(wv@bit -1)
+          #n <- length(s1)
+          #p <- fft(s1)
+          #nUniquePts <- ceiling((n+1)/2)
+          #p <- p[1:nUniquePts] #select just the first half since the second half 
+          #p <- abs(p)  #take the absolute value, or the magnitude 
+          #p <- p / n #scale by the number of points so that
+          #p <- p^2  # square it to get the power 
+          #if (n %% 2 > 0){
+          #  p[2:length(p)] <- p[2:length(p)]*2 # we've got odd number of points fft
+          #} else {
+          #  p[2: (length(p) -1)] <- p[2: (length(p) -1)]*2 # we've got even number of points fft
+          #}
+          #freqArray <- (0:(nUniquePts-1)) * (wv@samp.rate / n) #  create the frequency array 
+          #plot(freqArray/1000, 10*log10(p), type='l', col='black', xlab='Frequency (kHz)', ylab='Power (dB)')
+          #specs[[j]]<-10*log10(p)
+          #old
+          #specs[[j]]<-stats::spectrum(ds1, plot=FALSE)
+          
+          #for raw signal comparison use the raw data as initialized below
+          specs[[j]]<-ds1
         }
         
         events[[paste(i,sep='')]]<-c()
         
         for(nChan in 1:nChannels){
-          events[[paste(i,sep='')]] <- cbind(events[[paste(i,sep='')]],round(specs[[nChan]]$spec,1))
-          #events[[paste(i,sep='')]] <- cbind(events[[paste(i,sep='')]],specs[[nChan]])
+          #for power spectra comparison use the power spectra of the slices as initialised below, old
+          #events[[paste(i,sep='')]] <- cbind(events[[paste(i,sep='')]],round(specs[[nChan]]$spec,1))
+          
+          #for raw signal comparison use the raw data as initialized below
+          events[[paste(i,sep='')]] <- cbind(events[[paste(i,sep='')]],specs[[nChan]])
         }
       }
       
@@ -76,38 +108,61 @@ for(lev in levels){
       rootsl <- list()
       
       matched<-list()
+      matchedSource<-list()
       
       for(j in 1:length(events)){
         interact<-list()
-        lastInteract <- list()
         if(j>1){
-          for(k in j-1:1){
+          for(k in 1:(j-1)){
+            
+            #setup parallel backend to use many processors
+            #cores=detectCores()
+            #cl <- makeCluster(cores[1]-1)
+            #registerDoParallel(cl)
+            #foreach(i=1:nChannels) %dopar% {
             for(l in 1:nChannels){
-              if(is.null(interact[[paste0(l)]])) interact[[paste0(l)]]<-l
-              if(k<j && is.null(matched[[paste(j,l,sep='_')]])){
-                #euclidian distance of the spectral densities
+              if(is.null(matched[[paste(j,l,sep='_')]]) && is.null(matchedSource[[paste(k,l,sep='_')]])){
+                #euclidian distance of the spectral densities or the raw signals
                 #diff<-dist(rbind(unlist(events[[j]][,l]),unlist(events[[k]][,l])), method = "euclidean")
+                
+                #spectral coherence
+                #diff<-stats::spectrum(cbind(unlist(events[[j]][,l]),unlist(events[[k]][,l])), plot=FALSE,spans=c(3,5))$coh
+                diff<-max(ccf(unlist(events[[j]][,l]),unlist(events[[k]][,l]),plot = F)$acf)
+                
+                if(is.na(diff[1])){
+                  diff <- 1
+                }
+                #compare the power spectra with the granger test
                 #diff <- round(grangertest(unlist(events[[j]][,l]),unlist(events[[k]][,l]))$F[2])
-                #print(diff)
-                #mean of the raw delta of the spectral densities
-                diff<-round(sum(data.frame(events[j])[,l]-data.frame(events[k])[,l]),0)
+                
+                #sum of the raw delta of the spectral densities
+                #diff<-round(sum(data.frame(events[j])[,l]-data.frame(events[k])[,l]),0)
                 
                 #threshold for euclidian
                 #if(abs(diff)<lev){
-                #threshold for raw delta
-                if(diff<=lev){
-                  if(length(tail(which(links[,3]==l),1)) > 0){
-                    if(links[tail(which(links[,3]==l),1),2]!=as.character(k)){
-                      links<-rbind(links,c(links[tail(which(links[,3]==l),1),2],k,paste0(l),0.2))
-                    }
-                  }
-                  links<-rbind(links,c(k,j,paste0(l),1))
+                
+                #threshold for granger test -> we are interested in F score around 1 for similarity
+                #if(round(diff)==1){
+                # for sectral coherence
+                if(mean(diff)>=cohlev){
+                  
+                  print(mean(diff))
+                  interact[[paste0(l)]]<-l
+                  
+                  #if(length(tail(which(links[,3]==l),1)) > 0){
+                  #  if(links[tail(which(links[,3]==l),1),2]!=as.character(k)){
+                  #    links<-rbind(links,c(links[tail(which(links[,3]==l),1),2],k,paste0(l),0.2))
+                  #  }
+                  #}
+                  links<-rbind(links,c(k,j,paste0(l),0.4))
                   rootsl[[paste0(l)]] <- c(k,paste0(l))
                   matched[[paste(j,l,sep='_')]]<-1
-                  lastInteract[[paste0(l)]]<-j
+                  matchedSource[[paste(k,l,sep='_')]]<-1
                 }
               }
             }
+            #stop cluster
+            #stopCluster(cl)
           }
         }
         nodes <- rbind(nodes, c(as.numeric(j),paste(interact,collapse=', '),as.numeric(j)))
@@ -172,7 +227,7 @@ for(lev in levels){
         qual_col_pals = brewer.pal.info[brewer.pal.info$category == 'qual',]
         col_vector = unlist(mapply(brewer.pal, qual_col_pals$maxcolors, rownames(qual_col_pals)))
         
-        colrs<-sample(col_vector, 14)
+        colrs<-sample(col_vector, 256, replace = T)
         E(g)$color <- colrs[as.numeric(E(g)$label)]
         E(g)$width <- E(g)$weight
         lay <- layout_on_grid(g)
