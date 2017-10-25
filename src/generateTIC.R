@@ -35,7 +35,7 @@ degree.distribution <- function (graph, cumulative = FALSE, ...)
 # parameters
 
 patients <- c('S001','S002','S003','S004','S005','S006','S007','S008','S009','S010','S011')
-suffices <- c('am') 
+suffices <- c('am','bm','cm') 
 
 levels <- c(50) # configure the threshold levels to inspect here
 cohlev <- 0.99 #this is for spectral coherence 
@@ -146,7 +146,7 @@ for(lev in levels){
                 # for sectral coherence
                 if(mean(diff)>=cohlev){
                   
-                  print(mean(diff))
+                  #print(mean(diff))
                   interact[[paste0(l)]]<-l
                   
                   #if(length(tail(which(links[,3]==l),1)) > 0){
