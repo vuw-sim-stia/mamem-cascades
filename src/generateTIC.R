@@ -6,8 +6,8 @@ library(scatterplot3d)
 library(igraph)
 library(lmtest)
 library(tuneR)
-#library(foreach)
-#library(doParallel)
+library(poweRlaw)
+library(plyr)
 
 # housekeeping
 options(scipen = 999)
@@ -34,15 +34,16 @@ degree.distribution <- function (graph, cumulative = FALSE, ...)
 
 # parameters
 
-patients <- c('S001','S002','S003','S004','S005','S006','S007','S008','S009','S010','S011')
-suffices <- c('am','bm','cm') 
+#patients <- c('S001','S002','S003','S004','S005','S006','S007','S008','S009','S010','S011')
+patients <- c('S001')
+suffices <- c('am')
 
 levels <- c(50) # configure the threshold levels to inspect here
 cohlev <- 0.99 #this is for spectral coherence 
 
 nChannels <- 256 # configure the number of channels of the EEG measurement here
 sRate <- 250
-secs <- 1 # configure how long the slices shall be
+secs <- 2 # configure how long the slices shall be
 # preprocessing
 
 stats <- data.frame(matrix(vector(), 6, 0))
@@ -51,7 +52,7 @@ for(lev in levels){
   
   for(pat in patients){
     for(suf in suffices){
-  
+      
       #replace with path to EEG data
       mat_dat <- readMat(paste("../data/",pat,suf,".mat",sep=''))
       
@@ -172,50 +173,88 @@ for(lev in levels){
       colnames(nodes) <- c('node_id','tags','dpub')
       
       if(length(links)>0){
-      #   colnames(links) <- c('source','target','tag')
-      #   colnames(roots) <- c('root_node_id','tag')
-      #   
-      #   nd <- as.networkDynamic(network.initialize(0))
-      #   set.network.attribute(nd,"vertex.pid","vertex.names")
-      #   set.network.attribute(nd,"edge.pid","edge.names")
-      #   for(i in 1:nrow(links)){
-      #     fromN <- get.vertex.id(nd,unlist(links[i,1]))
-      #     if(is.na(fromN)){
-      #       add.vertices(nd,nv=1,vertex.pid=c(unlist(links[i,1])))
-      #       fromN <- get.vertex.id(nd,unlist(links[i,1]))
-      #       set.vertex.attribute(nd,'content',unlist(nodes[which(nodes[,1]==unlist(links[i,1])),2]),v=c(fromN))
-      #       set.vertex.attribute(nd,'content2',paste(unlist(words300B[unlist(nodes[which(nodes[,1]==unlist(links[i,1])),1])]),collapse=' '),v=c(fromN))
-      #       set.vertex.attribute(nd,'step',unlist(nodes[which(nodes[,1]==unlist(links[i,1])),1]),v=c(fromN))
-      #       activate.vertices(nd,onset=as.numeric(unlist(links[i,2])),terminus=max(as.numeric(unlist(links[,2])))+1,v=c(fromN))
-      #     }
-      #     
-      #     toN <- get.vertex.id(nd,unlist(links[i,2]))
-      #     if(is.na(toN)){
-      #       add.vertices(nd,nv=1,vertex.pid=c(unlist(links[i,2])))
-      #       toN <- get.vertex.id(nd,unlist(links[i,2]))
-      #       set.vertex.attribute(nd,'content',unlist(nodes[which(nodes[,1]==unlist(links[i,2])),2]),v=c(toN))
-      #       set.vertex.attribute(nd,'content2',paste(unlist(words300B[unlist(nodes[which(nodes[,1]==unlist(links[i,2])),1])]),collapse=' '),v=c(toN))
-      #       set.vertex.attribute(nd,'step',unlist(nodes[which(nodes[,1]==unlist(links[i,2])),1]),v=c(toN))
-      #       activate.vertices(nd,onset=as.numeric(unlist(links[i,2])),terminus=max(as.numeric(unlist(links[,2])))+1,v=c(toN))
-      #     }
-      #     edgeID <- which(get.edge.attribute(nd,'ident')==paste(unlist(links[i,1]),unlist(links[i,2]),sep='-'))
-      #     if(length(edgeID)==0){
-      #       add.edges.active(nd,onset=as.numeric(unlist(links[i,2])), terminus=max(as.numeric(unlist(links[,2])))+1,head=toN,tail=fromN,names.eval=list(list('set','ident')),vals.eval=list(list(links[i,3][[1]],paste(unlist(links[i,1]),unlist(links[i,2]),sep='-'))))
-      #     } else{
-      #       linkLabel <- paste(get.edge.attribute(nd,'set',unlist=FALSE)[[edgeID]],unlist(links[i,3]),sep=", ")
-      #       set.edge.attribute(nd, attrname='set', value=linkLabel, e=c(edgeID))
-      #     }
-      #   }
-      #   
-      #   compute.animation(nd, animation.mode = "kamadakawai", chain.direction=c('forward'),weight.dist=T,default.dist=3)
-      #   
-      #   #interactive
-      #   render.d3movie(nd, filename=paste("../dynamic-network.html",sep=''),launchBrowser=T, 
-      #                  displaylabels = T, label=nd %v% "vertex.names",
-      #                  vertex.col="white",edge.col="darkgray",label.cex=.6,
-      #                  vertex.cex = function(slice){ degree(slice)/10 }, vertex.border="#000000",
-      #                  vertex.tooltip = paste("<span style='font-size: 10px;'><b>Slice:</b>", (nd %v% "step") , "<br>","<b>Matched characters:</b>", (nd %v% "content"), "<br>"),
-      #                  edge.tooltip = paste("<b>Link:</b>", (nd %e% "set"),"</span>" ))
+        links <- data.frame(source=unlist(links[,1]),target=unlist(links[,2]),tag=unlist(links[,3]),weight=unlist(links[,4]),stringsAsFactors = F)
+        colnames(links) <- c('source','target','tag','weight')
+        linksDelta <- as.integer(links$target)-as.integer(links$source)
+        jpeg(paste0("../output/",lev,"/",pat,suf,"_links_delta.jpg"))
+        plot(linksDelta,type='l')
+        abline(h=mean(linksDelta),col="red")
+        abline(h=median(linksDelta),col="blue")
+        dev.off()
+        
+        linksDelta.count <- count(linksDelta)
+        jpeg(paste0("../output/",lev,"/",pat,suf,"_links_delta_distri.jpg"))
+        plot(linksDelta.count$x,linksDelta.count$freq,pch=20)
+        dev.off()
+        
+        jpeg(paste0("../output/",lev,"/",pat,suf,"_links_delta_distri_loglog.jpg"))
+        plot(linksDelta.count$x,linksDelta.count$freq,pch=20,log="xy")
+        dev.off()
+        
+        #power law?
+        
+        m_bl = displ$new(linksDelta)
+        est = estimate_xmin(m_bl)
+        m_bl$setXmin(est)
+        m_ln = dislnorm$new(linksDelta)
+        est = estimate_xmin(m_ln)
+        m_ln$setXmin(est)
+        m_pois = dispois$new(linksDelta)
+        est = estimate_xmin(m_pois)
+        m_pois$setXmin(est)
+        
+        jpeg(paste0("../output/",lev,"/",pat,suf,"_links_delta_distri_plaw.jpg"))
+        plot(m_bl, ylab="CDF")
+        text(100,0.15,bquote(x[min] ~ .(paste0("=")) ~ .(m_bl$xmin) ~ .(paste0(", ")) ~ alpha ~ .(paste0("=")) ~ .(m_bl$pars)))
+        lines(m_bl, col=2)
+        lines(m_ln, col=3)
+        lines(m_pois, col=4)
+        dev.off()
+        
+        #   colnames(links) <- c('source','target','tag')
+        #   colnames(roots) <- c('root_node_id','tag')
+        #   
+        #   nd <- as.networkDynamic(network.initialize(0))
+        #   set.network.attribute(nd,"vertex.pid","vertex.names")
+        #   set.network.attribute(nd,"edge.pid","edge.names")
+        #   for(i in 1:nrow(links)){
+        #     fromN <- get.vertex.id(nd,unlist(links[i,1]))
+        #     if(is.na(fromN)){
+        #       add.vertices(nd,nv=1,vertex.pid=c(unlist(links[i,1])))
+        #       fromN <- get.vertex.id(nd,unlist(links[i,1]))
+        #       set.vertex.attribute(nd,'content',unlist(nodes[which(nodes[,1]==unlist(links[i,1])),2]),v=c(fromN))
+        #       set.vertex.attribute(nd,'content2',paste(unlist(words300B[unlist(nodes[which(nodes[,1]==unlist(links[i,1])),1])]),collapse=' '),v=c(fromN))
+        #       set.vertex.attribute(nd,'step',unlist(nodes[which(nodes[,1]==unlist(links[i,1])),1]),v=c(fromN))
+        #       activate.vertices(nd,onset=as.numeric(unlist(links[i,2])),terminus=max(as.numeric(unlist(links[,2])))+1,v=c(fromN))
+        #     }
+        #     
+        #     toN <- get.vertex.id(nd,unlist(links[i,2]))
+        #     if(is.na(toN)){
+        #       add.vertices(nd,nv=1,vertex.pid=c(unlist(links[i,2])))
+        #       toN <- get.vertex.id(nd,unlist(links[i,2]))
+        #       set.vertex.attribute(nd,'content',unlist(nodes[which(nodes[,1]==unlist(links[i,2])),2]),v=c(toN))
+        #       set.vertex.attribute(nd,'content2',paste(unlist(words300B[unlist(nodes[which(nodes[,1]==unlist(links[i,2])),1])]),collapse=' '),v=c(toN))
+        #       set.vertex.attribute(nd,'step',unlist(nodes[which(nodes[,1]==unlist(links[i,2])),1]),v=c(toN))
+        #       activate.vertices(nd,onset=as.numeric(unlist(links[i,2])),terminus=max(as.numeric(unlist(links[,2])))+1,v=c(toN))
+        #     }
+        #     edgeID <- which(get.edge.attribute(nd,'ident')==paste(unlist(links[i,1]),unlist(links[i,2]),sep='-'))
+        #     if(length(edgeID)==0){
+        #       add.edges.active(nd,onset=as.numeric(unlist(links[i,2])), terminus=max(as.numeric(unlist(links[,2])))+1,head=toN,tail=fromN,names.eval=list(list('set','ident')),vals.eval=list(list(links[i,3][[1]],paste(unlist(links[i,1]),unlist(links[i,2]),sep='-'))))
+        #     } else{
+        #       linkLabel <- paste(get.edge.attribute(nd,'set',unlist=FALSE)[[edgeID]],unlist(links[i,3]),sep=", ")
+        #       set.edge.attribute(nd, attrname='set', value=linkLabel, e=c(edgeID))
+        #     }
+        #   }
+        #   
+        #   compute.animation(nd, animation.mode = "kamadakawai", chain.direction=c('forward'),weight.dist=T,default.dist=3)
+        #   
+        #   #interactive
+        #   render.d3movie(nd, filename=paste("../dynamic-network.html",sep=''),launchBrowser=T, 
+        #                  displaylabels = T, label=nd %v% "vertex.names",
+        #                  vertex.col="white",edge.col="darkgray",label.cex=.6,
+        #                  vertex.cex = function(slice){ degree(slice)/10 }, vertex.border="#000000",
+        #                  vertex.tooltip = paste("<span style='font-size: 10px;'><b>Slice:</b>", (nd %v% "step") , "<br>","<b>Matched characters:</b>", (nd %v% "content"), "<br>"),
+        #                  edge.tooltip = paste("<b>Link:</b>", (nd %e% "set"),"</span>" ))
         
         colnames(links) <- c("id1","id2","label","weight")
         g <- graph.data.frame(links,directed=TRUE)
@@ -270,19 +309,11 @@ for(lev in levels){
         
         jpeg(paste("../output/",lev,"/",pat,suf,"_links_targets.jpg",sep=''))
         plot(links[,2],as.numeric(links[,3]),pch=".")
-        for(ab in 1:20){
-          if(ab %% 2 != 0) abline(v=(5*ab), col = "lightgray", lty = "dotted")
-          else abline(v=(5*ab), col = "lightgray", lty = "dashed")
-        }
         dev.off()
         write.csv(cbind(links[,2],as.numeric(links[,3])),file=paste('../output/',lev,'/',pat,suf,'_targets.txt',sep=''))
         
         jpeg(paste("../output/",lev,"/",pat,suf,"_links_sources.jpg",sep=''))
         plot(links[,1],as.numeric(links[,3]),pch=".")
-        for(ab in 1:20){
-          if(ab %% 2 != 0) abline(v=(5*ab), col = "lightgray", lty = "dotted")
-          else abline(v=(5*ab), col = "lightgray", lty = "dashed")
-        }
         dev.off()
         write.csv(cbind(links[,1],as.numeric(links[,3])),file=paste('../output/',lev,'/',pat,suf,'_sources.txt',sep=''))
         
@@ -297,7 +328,7 @@ for(lev in levels){
         div=1
         
         for(z in 1:nrow(nodes)){
-            #entropy
+          #entropy
           if(z==1){
             ent <- rbind(ent,c(0,1,0,1))
           }
@@ -339,7 +370,7 @@ for(lev in levels){
               ent <- rbind(ent,c(entropy.empirical(df[,1], unit="log2"),(-1*(colSums(df)[3]))/log2(nrow(df)),-1*(colSums(df)[3]),(-1*(colSums(df)[3]))/log(nrow(df))))
             }
           }
-            colnames(ent)<-c('empEntropy','evenness_log2','entropy','evenness')
+          colnames(ent)<-c('empEntropy','evenness_log2','entropy','evenness')
         }
         colnames(coordinates) <- c("t","specificity","diversity")
         jpeg(paste("../output/",lev,"/",pat,suf,"_coordinates.jpg",sep=''))
@@ -349,17 +380,9 @@ for(lev in levels){
         write.csv(ent,file=paste('../output/',lev,'/eeg_temp_stats_',pat,suf,'_entropy.txt',sep=''))
         jpeg(paste("../output/",lev,"/",pat,suf,"_entropy.jpg",sep=''))
         plot(ent[,1],type="l")
-        for(ab in 1:20){
-          if(ab %% 2 != 0) abline(v=(5*ab), col = "lightgray", lty = "dotted")
-          else abline(v=(5*ab), col = "lightgray", lty = "dashed")
-        }
         dev.off()
         jpeg(paste("../output/",lev,"/",pat,suf,"_evenness.jpg",sep=''))
         plot(ent[,2],type="l")
-        for(ab in 1:20){
-          if(ab %% 2 != 0) abline(v=(5*ab), col = "lightgray", lty = "dotted")
-          else abline(v=(5*ab), col = "lightgray", lty = "dashed")
-        }
         dev.off()
       } else{
         gstat <- data.frame(c('-','-','-','-','-','-'))
